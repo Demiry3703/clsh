@@ -1,0 +1,17 @@
+{
+  "name": "clsh — Your Mac, in your pocket",
+  "short_name": "clsh",
+  "description": "Access your terminal and Claude Code from any device.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#060606",
+  "theme_color": "#f97316",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
