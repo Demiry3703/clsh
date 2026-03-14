@@ -6,11 +6,10 @@ import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import {
   generateBootstrapToken,
-  hashToken,
   verifyBootstrapToken,
   createSessionJWT,
 } from './auth.js';
-import { createSSERouter, emitAuthComplete } from './sse-handler.js';
+import { createSSERouter } from './sse-handler.js';
 import type { DbStatements } from './db.js';
 import type { AgentConfig } from './config.js';
 
@@ -131,63 +130,6 @@ function mountAuthRoutes(
     }
   });
 
-  // POST /api/auth/magic-link — request a magic link (placeholder for Resend integration)
-  app.post('/api/auth/magic-link', (req, res) => {
-    const { email, pendingId } = req.body as { email?: string; pendingId?: string };
-
-    if (!email || typeof email !== 'string') {
-      res.status(400).json({ error: 'Missing or invalid email' });
-      return;
-    }
-
-    if (!pendingId || typeof pendingId !== 'string') {
-      res.status(400).json({ error: 'Missing pendingId' });
-      return;
-    }
-
-    // TODO: Send magic link email via Resend
-    // For now, immediately generate a JWT and emit the auth-complete event
-    // This will be replaced with actual Resend email sending
-    void (async () => {
-      try {
-        const jwt = await createSessionJWT(
-          { email, authMethod: 'magic-link' },
-          config.jwtSecret,
-        );
-        emitAuthComplete(pendingId, jwt);
-      } catch (err) {
-        console.error('Magic link auth error:', err);
-      }
-    })();
-
-    res.json({ status: 'pending', message: 'Magic link flow initiated' });
-  });
-
-  // GET /api/auth/verify — verify a magic link token and emit auth-complete
-  app.get('/api/auth/verify', async (req, res) => {
-    try {
-      const { token, pendingId } = req.query as { token?: string; pendingId?: string };
-
-      if (!token || !pendingId) {
-        res.status(400).json({ error: 'Missing token or pendingId' });
-        return;
-      }
-
-      // For magic link verification, the token here would be a short-lived
-      // verification token. For now, we create a new session JWT.
-      const jwt = await createSessionJWT(
-        { authMethod: 'magic-link' },
-        config.jwtSecret,
-      );
-
-      emitAuthComplete(pendingId, jwt);
-
-      res.json({ status: 'ok', message: 'Authentication complete. You can close this tab.' });
-    } catch (err) {
-      console.error('Verify auth error:', err);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  });
 }
 
 /**
@@ -231,4 +173,4 @@ export async function startServer(
   });
 }
 
-export { generateBootstrapToken, hashToken };
+export { generateBootstrapToken };

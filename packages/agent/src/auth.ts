@@ -18,10 +18,14 @@ export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/** How long a bootstrap token remains valid after creation (5 minutes). */
+const BOOTSTRAP_TOKEN_TTL_MS = 5 * 60 * 1000;
+
 /**
  * Verifies a bootstrap token candidate against the database.
- * The token remains valid for the lifetime of the server process
- * so the same QR code / URL can be used from multiple devices (e.g. PWA).
+ * Tokens expire after 5 minutes — long enough for the user to scan the QR
+ * in Safari, add the PWA to their home screen, and re-authenticate, but
+ * short enough to limit exposure if the QR code is intercepted.
  */
 export function verifyBootstrapToken(
   statements: DbStatements,
@@ -29,12 +33,16 @@ export function verifyBootstrapToken(
 ): boolean {
   const hash = hashToken(candidateToken);
   const row = statements.getBootstrapToken.get(hash);
-  return !!row;
+  if (!row) return false;
+
+  const createdAt = new Date(row.created_at + 'Z').getTime(); // SQLite datetime is UTC without 'Z'
+  const age = Date.now() - createdAt;
+  return age < BOOTSTRAP_TOKEN_TTL_MS;
 }
 
 export interface SessionJWTClaims {
   email?: string;
-  authMethod: 'bootstrap' | 'magic-link';
+  authMethod: 'bootstrap';
 }
 
 /**
@@ -51,7 +59,7 @@ export async function createSessionJWT(
   return new SignJWT({ ...claims })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime('8h')
+    .setExpirationTime('30d')
     .setJti(jti)
     .setIssuer('clsh-agent')
     .setSubject(claims.email ?? 'local')

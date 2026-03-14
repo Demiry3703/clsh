@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useRef, type FormEvent, type ClipboardEvent } from 'react';
 import type { AuthState } from '../hooks/useAuth';
 import { IOSKeyboard } from './IOSKeyboard';
 import { useIsMobile } from '../hooks/useMediaQuery';
@@ -12,6 +12,7 @@ export function AuthScreen({ auth, onBootstrapSubmit }: AuthScreenProps) {
   const [bootstrapToken, setBootstrapToken] = useState('');
   const [showKeyboard, setShowKeyboard] = useState(false);
   const isMobile = useIsMobile();
+  const mobileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -20,13 +21,24 @@ export function AuthScreen({ auth, onBootstrapSubmit }: AuthScreenProps) {
     await onBootstrapSubmit(trimmed);
   };
 
-  const handlePaste = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) setBootstrapToken(text.trim());
-    } catch {
-      // Clipboard API not available
+  /** Handle native paste event on the mobile input — no clipboard API, no iOS flicker. */
+  const handleNativePaste = (e: ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    if (text) setBootstrapToken(text.trim());
+  };
+
+  const handlePaste = () => {
+    if (isMobile && mobileInputRef.current) {
+      // Focus the hidden input — iOS will show its native "Paste" popup
+      // above the cursor. User taps it → onPaste fires → no clipboard API needed.
+      mobileInputRef.current.focus();
+      return;
     }
+    // Desktop fallback: use clipboard API (no permission issues on desktop)
+    void navigator.clipboard.readText().then((text) => {
+      if (text) setBootstrapToken(text.trim());
+    }).catch(() => { /* clipboard unavailable */ });
   };
 
   const handleAuthKey = (data: string) => {
@@ -71,16 +83,22 @@ export function AuthScreen({ auth, onBootstrapSubmit }: AuthScreenProps) {
                 Bootstrap Token
               </label>
               <div className="relative flex items-center">
-                {/* On mobile: tap to show keyboard (no native iOS keyboard, no zoom) */}
+                {/* On mobile: real input with inputMode="none" suppresses iOS keyboard.
+                    Native paste (long-press or Paste button → focus) works without clipboard API. */}
                 {isMobile ? (
-                  <div
-                    className="w-full rounded-md border border-clsh-border bg-clsh-surface px-3 py-2.5 pr-20 text-sm text-white min-h-[42px] flex items-center overflow-hidden whitespace-nowrap cursor-text"
-                    onClick={() => setShowKeyboard(true)}
-                  >
-                    {bootstrapToken || (
-                      <span className="text-xs text-neutral-600">Paste token from terminal...</span>
-                    )}
-                  </div>
+                  <input
+                    ref={mobileInputRef}
+                    type="text"
+                    value={bootstrapToken}
+                    onChange={(e) => setBootstrapToken(e.target.value)}
+                    onPaste={handleNativePaste}
+                    onFocus={() => setShowKeyboard(true)}
+                    inputMode="none"
+                    placeholder="Long-press to paste token..."
+                    autoComplete="off"
+                    disabled={auth.loading}
+                    className="w-full rounded-md border border-clsh-border bg-clsh-surface px-3 py-2.5 pr-20 text-sm text-white placeholder-neutral-600 outline-none transition-colors focus:border-clsh-orange min-h-[42px]"
+                  />
                 ) : (
                   <input
                     id="bootstrap-token"

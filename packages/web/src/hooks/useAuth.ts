@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 export interface AuthState {
   isAuthenticated: boolean;
@@ -10,7 +10,6 @@ export interface AuthState {
 interface AuthReturn {
   auth: AuthState;
   authenticateWithBootstrap: (token: string) => Promise<boolean>;
-  authenticateWithMagicLink: (email: string) => Promise<void>;
   logout: () => void;
   /** Called when the WS closes with code 4001 (token expired/backend restarted) */
   handleUnauthorized: () => void;
@@ -29,8 +28,8 @@ const INITIAL_STATE: AuthState = {
 /**
  * Auth state management hook.
  *
- * Stores the JWT in memory (not localStorage). Supports two authentication
- * flows: bootstrap token (primary) and magic link (secondary).
+ * Stores the JWT in localStorage so it persists across PWA close/reopen.
+ * Supports bootstrap token authentication (scan QR once, stay connected for 30 days).
  *
  * On mount, checks for a `?token=` URL parameter and auto-authenticates.
  */
@@ -47,17 +46,6 @@ export function useAuth(): AuthReturn {
     }
     return INITIAL_STATE;
   });
-  const eventSourceRef = useRef<EventSource | null>(null);
-
-  // Clean up any active SSE connection on unmount
-  useEffect(() => {
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-    };
-  }, []);
 
   const authenticateWithBootstrap = useCallback(
     async (bootstrapToken: string): Promise<boolean> => {
@@ -117,85 +105,7 @@ export function useAuth(): AuthReturn {
     [],
   );
 
-  const authenticateWithMagicLink = useCallback(
-    async (email: string): Promise<void> => {
-      setAuth((prev) => ({ ...prev, loading: true, error: null }));
-
-      try {
-        const response = await fetch('/api/auth/magic-link', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
-        });
-
-        if (!response.ok) {
-          const body = (await response.json()) as { error?: string };
-          const message = body.error ?? `Failed to send magic link (${String(response.status)})`;
-          setAuth((prev) => ({
-            ...prev,
-            loading: false,
-            error: message,
-          }));
-          return;
-        }
-
-        const data = (await response.json()) as { pendingId: string };
-
-        // Close any existing SSE connection
-        if (eventSourceRef.current) {
-          eventSourceRef.current.close();
-        }
-
-        // Listen for the auth_complete event via SSE
-        const es = new EventSource(`/api/sse/events/${data.pendingId}`);
-        eventSourceRef.current = es;
-
-        es.addEventListener('auth_complete', (event: MessageEvent) => {
-          const payload = JSON.parse(String(event.data)) as { token: string };
-          setAuth({
-            isAuthenticated: true,
-            token: payload.token,
-            loading: false,
-            error: null,
-          });
-          es.close();
-          eventSourceRef.current = null;
-        });
-
-        es.addEventListener('error', () => {
-          setAuth((prev) => ({
-            ...prev,
-            loading: false,
-            error: 'Lost connection while waiting for magic link confirmation',
-          }));
-          es.close();
-          eventSourceRef.current = null;
-        });
-
-        // Keep loading state active while waiting for SSE
-        setAuth((prev) => ({
-          ...prev,
-          loading: true,
-          error: null,
-        }));
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : 'Network error';
-        setAuth((prev) => ({
-          ...prev,
-          loading: false,
-          error: message,
-        }));
-      }
-    },
-    [],
-  );
-
   const logout = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
     try {
       STORAGE.removeItem(SESSION_KEY);
     } catch {
@@ -220,5 +130,5 @@ export function useAuth(): AuthReturn {
     setAuth(INITIAL_STATE);
   }, []);
 
-  return { auth, authenticateWithBootstrap, authenticateWithMagicLink, logout, handleUnauthorized };
+  return { auth, authenticateWithBootstrap, logout, handleUnauthorized };
 }
